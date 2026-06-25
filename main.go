@@ -94,7 +94,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	var stops stopValues
 	var cShort, cLong bool
 	var sessionName, system stringValue
-	var newSession, insecure, stream, noStream, jsonOut, listSessions, clearSessions bool
+	var newSession, insecure, stream, noStream, jsonOut, verbose, listSessions, clearSessions bool
 	var removeSession stringValue
 	fs.Var(&pShort, "p", "profile name (flags must appear before the prompt)")
 	fs.Var(&pLong, "profile", "profile name (flags must appear before the prompt)")
@@ -113,6 +113,8 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	fs.BoolVar(&stream, "stream", false, "force streaming output")
 	fs.BoolVar(&noStream, "no-stream", false, "disable streaming")
 	fs.BoolVar(&jsonOut, "json", false, "write a single JSON object; implies --no-stream")
+	fs.BoolVar(&verbose, "v", false, "write resolved request diagnostics to stderr")
+	fs.BoolVar(&verbose, "verbose", false, "write resolved request diagnostics to stderr")
 	fs.BoolVar(&listSessions, "list-sessions", false, "list sessions")
 	fs.Var(&removeSession, "rm-session", "remove a named session")
 	fs.BoolVar(&clearSessions, "clear-sessions", false, "remove all sessions")
@@ -165,6 +167,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		Stream:        stream,
 		NoStream:      noStream,
 		JSON:          jsonOut,
+		Verbose:       verbose,
 		ListSessions:  listSessions,
 		RemoveSession: removeSession.value,
 		ClearSessions: clearSessions,

@@ -31,6 +31,64 @@ func TestEndpointJoin(t *testing.T) {
 	}
 }
 
+func TestResolveEndpointStripsTrailingChatCompletions(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{
+			input: "https://api.test/v1/chat/completions",
+			want:  "https://api.test/v1/chat/completions",
+		},
+		{
+			input: "https://api.test/v1/chat/completions/",
+			want:  "https://api.test/v1/chat/completions",
+		},
+		{
+			input: "https://api.test/v1/chat/completions/?ignored=true#frag",
+			want:  "https://api.test/v1/chat/completions",
+		},
+	}
+	for _, tc := range tests {
+		got, err := ResolveEndpoint(tc.input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.URL != tc.want {
+			t.Fatalf("ResolveEndpoint(%q).URL = %q, want %q", tc.input, got.URL, tc.want)
+		}
+		if !got.StrippedChatCompletions {
+			t.Fatalf("ResolveEndpoint(%q).StrippedChatCompletions = false", tc.input)
+		}
+	}
+}
+
+func TestResolveEndpointDoesNotWarnForAPIRoot(t *testing.T) {
+	got, err := ResolveEndpoint("https://api.test/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.URL != "https://api.test/v1/chat/completions" {
+		t.Fatalf("URL = %q", got.URL)
+	}
+	if got.StrippedChatCompletions {
+		t.Fatal("StrippedChatCompletions = true")
+	}
+}
+
+func TestResolveEndpointRemovesUserInfoQueryAndFragment(t *testing.T) {
+	got, err := ResolveEndpoint("https://sk-secret@api.test/v1?api_key=sk-secret#sk-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.URL != "https://api.test/v1/chat/completions" {
+		t.Fatalf("URL = %q", got.URL)
+	}
+	if strings.Contains(got.URL, "sk-secret") {
+		t.Fatalf("secret leaked in URL: %q", got.URL)
+	}
+}
+
 func TestCompleteWithHTTPTestServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {

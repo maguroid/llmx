@@ -57,6 +57,7 @@ type Options struct {
 	NoStream      bool
 	Stream        bool
 	JSON          bool
+	Verbose       bool
 	ListSessions  bool
 	RemoveSession string
 	ClearSessions bool
@@ -124,11 +125,20 @@ func Run(ctx context.Context, opts Options) int {
 	if httpClient == nil {
 		httpClient = defaultHTTPClient()
 	}
-	apiClient, err := client.New(httpClient, resolved.BaseURL)
+	endpoint, err := client.ResolveEndpoint(resolved.BaseURL)
 	if err != nil {
 		fmt.Fprintf(opts.Stderr, "configuration error: %v\n", err)
 		return ExitConfig
 	}
+	if endpoint.StrippedChatCompletions {
+		fmt.Fprintf(opts.Stderr, "warning: %s\n", client.StrippedChatCompletionsWarning)
+	}
+	if opts.Verbose {
+		fmt.Fprintf(opts.Stderr, "profile: %s\n", resolved.Profile)
+		fmt.Fprintf(opts.Stderr, "model: %s\n", resolved.Model)
+		fmt.Fprintf(opts.Stderr, "endpoint: %s\n", endpoint.URL)
+	}
+	apiClient := client.NewWithEndpoint(httpClient, endpoint.URL)
 	var assistant string
 	var model string
 	var usage *chat.Usage

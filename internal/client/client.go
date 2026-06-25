@@ -24,6 +24,13 @@ type Client struct {
 	endpoint   string
 }
 
+const StrippedChatCompletionsWarning = "base_url should be the API root; stripped trailing /chat/completions"
+
+type EndpointResolution struct {
+	URL                     string
+	StrippedChatCompletions bool
+}
+
 type APIError struct {
 	StatusCode int
 	Message    string
@@ -42,28 +49,47 @@ func (e *ProtocolError) Error() string {
 }
 
 func New(httpClient *http.Client, baseURL string) (*Client, error) {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	endpoint, err := Endpoint(baseURL)
+	resolved, err := ResolveEndpoint(baseURL)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{httpClient: httpClient, endpoint: endpoint}, nil
+	return NewWithEndpoint(httpClient, resolved.URL), nil
+}
+
+func NewWithEndpoint(httpClient *http.Client, endpoint string) *Client {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	return &Client{httpClient: httpClient, endpoint: endpoint}
 }
 
 func Endpoint(baseURL string) (string, error) {
+	resolved, err := ResolveEndpoint(baseURL)
+	if err != nil {
+		return "", err
+	}
+	return resolved.URL, nil
+}
+
+func ResolveEndpoint(baseURL string) (EndpointResolution, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		return "", fmt.Errorf("invalid base_url: %w", err)
+		return EndpointResolution{}, fmt.Errorf("invalid base_url: %w", err)
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("invalid base_url: missing scheme or host")
+		return EndpointResolution{}, fmt.Errorf("invalid base_url: missing scheme or host")
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/chat/completions"
+	path := strings.TrimRight(u.Path, "/")
+	stripped := false
+	if strings.HasSuffix(path, "/chat/completions") {
+		path = strings.TrimSuffix(path, "/chat/completions")
+		stripped = true
+	}
+	u.Path = path + "/chat/completions"
+	u.User = nil
 	u.RawQuery = ""
 	u.Fragment = ""
-	return u.String(), nil
+	return EndpointResolution{URL: u.String(), StrippedChatCompletions: stripped}, nil
 }
 
 func (c *Client) Complete(ctx context.Context, apiKey chat.Secret, req chat.Request) (chat.Response, error) {

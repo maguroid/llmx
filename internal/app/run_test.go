@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/maguroid/llmx/internal/chat"
+	"github.com/maguroid/llmx/internal/client"
 	"github.com/maguroid/llmx/internal/session"
 )
 
@@ -157,6 +158,116 @@ func TestRunExplicitBaseURLOmitsAuthorizationWhenAPIKeyEmpty(t *testing.T) {
 	}
 	if stdout.String() != "local ok\n" {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunStripsTrailingChatCompletionsFromBaseURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		baseSuffix  string
+		wantWarning bool
+	}{
+		{name: "endpoint included", baseSuffix: "/v1/chat/completions", wantWarning: true},
+		{name: "endpoint included with slash", baseSuffix: "/v1/chat/completions/", wantWarning: true},
+		{name: "api root", baseSuffix: "/v1", wantWarning: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if r.URL.Path != "/v1/chat/completions" {
+					t.Fatalf("path = %s", r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+			}))
+			defer server.Close()
+			writeCredentials(t, home, "[default]\nbase_url="+server.URL+tc.baseSuffix+"\napi_key=sk-test\nmodel=m\n")
+
+			var stdout, stderr bytes.Buffer
+			code := Run(context.Background(), Options{
+				Args:        []string{"hello"},
+				Stdin:       strings.NewReader(""),
+				Stdout:      &stdout,
+				Stderr:      &stderr,
+				StdinIsTTY:  true,
+				StdoutIsTTY: false,
+				HomeDir:     home,
+				HTTPClient:  server.Client(),
+				LookupEnv:   emptyEnv,
+				Usage:       func() {},
+			})
+			if code != ExitOK {
+				t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+			}
+			if requests != 1 {
+				t.Fatalf("requests = %d", requests)
+			}
+			hasWarning := strings.Contains(stderr.String(), "warning: "+client.StrippedChatCompletionsWarning)
+			if hasWarning != tc.wantWarning {
+				t.Fatalf("warning = %v, want %v; stderr = %q", hasWarning, tc.wantWarning, stderr.String())
+			}
+			if stdout.String() != "ok\n" {
+				t.Fatalf("stdout = %q", stdout.String())
+			}
+		})
+	}
+}
+
+func TestRunVerboseWritesDiagnosticsToStderrOnly(t *testing.T) {
+	home := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"server-model","choices":[{"index":0,"message":{"role":"assistant","content":"answer"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+	writeCredentials(t, home, "[default]\nbase_url="+server.URL+"/v1\napi_key=sk-secret\nmodel=m\n")
+
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), Options{
+		Args:        []string{"hello"},
+		Stdin:       strings.NewReader(""),
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		StdinIsTTY:  true,
+		StdoutIsTTY: false,
+		HomeDir:     home,
+		HTTPClient:  server.Client(),
+		LookupEnv:   emptyEnv,
+		Usage:       func() {},
+		JSON:        true,
+		Verbose:     true,
+	})
+	if code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout is not JSON response: %q", stdout.String())
+	}
+	if out["content"] != "answer" {
+		t.Fatalf("stdout content = %v", out["content"])
+	}
+	if strings.Contains(stdout.String(), "endpoint:") || strings.Contains(stdout.String(), "sk-secret") {
+		t.Fatalf("stdout polluted or leaked secret: %q", stdout.String())
+	}
+	stderrText := stderr.String()
+	for _, want := range []string{
+		"profile: default",
+		"model: m",
+		"endpoint: " + server.URL + "/v1/chat/completions",
+	} {
+		if !strings.Contains(stderrText, want) {
+			t.Fatalf("stderr missing %q: %q", want, stderrText)
+		}
+	}
+	if strings.Contains(stderrText, "sk-secret") {
+		t.Fatalf("secret leaked in stderr: %q", stderrText)
 	}
 }
 
