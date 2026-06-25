@@ -182,6 +182,18 @@ Streaming defaults to on when stdout is a TTY and off when piped; `--stream` /
 | 4    | Network / timeout (before reaching the API) |
 | 130  | Interrupted (Ctrl-C)                       |
 
+## Use with AI agents
+
+This repo ships an agent skill that teaches coding agents how to drive `llmx`
+correctly (setup, the stdin/flag gotchas, `--json` parsing, sessions). Install it
+into your agent's skills directory with:
+
+```sh
+npx skills add maguroid/llmx
+```
+
+The skill source lives in [`skills/llmx/`](skills/llmx/SKILL.md).
+
 ## License
 
 [MIT](LICENSE) © maguroid
