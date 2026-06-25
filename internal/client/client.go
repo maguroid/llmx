@@ -82,7 +82,7 @@ func (c *Client) Complete(ctx context.Context, apiKey chat.Secret, req chat.Requ
 	return response, nil
 }
 
-func (c *Client) Stream(ctx context.Context, apiKey chat.Secret, req chat.Request, onDelta func(string)) (StreamResult, error) {
+func (c *Client) Stream(ctx context.Context, apiKey chat.Secret, req chat.Request, onDelta func(string) error) (StreamResult, error) {
 	body, err := c.doStream(ctx, apiKey, req)
 	if err != nil {
 		return StreamResult{}, err
@@ -123,7 +123,10 @@ func (c *Client) Stream(ctx context.Context, apiKey chat.Secret, req chat.Reques
 			if choice.Delta.Content != nil {
 				builder.WriteString(*choice.Delta.Content)
 				if onDelta != nil {
-					onDelta(*choice.Delta.Content)
+					if err := onDelta(*choice.Delta.Content); err != nil {
+						_ = body.Close()
+						return StreamResult{}, err
+					}
 				}
 			}
 		}
@@ -174,7 +177,7 @@ func (c *Client) send(ctx context.Context, apiKey chat.Secret, req chat.Request)
 	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, err
+		return nil, redactError(err, apiKey.Reveal())
 	}
 	return resp, nil
 }
@@ -207,8 +210,12 @@ func (c *Client) sendWithRetry(ctx context.Context, apiKey chat.Secret, req chat
 }
 
 func retryableStatus(code int) bool {
+	if code == http.StatusInternalServerError || (code >= http.StatusBadGateway && code <= http.StatusGatewayTimeout) {
+		// Retry 500 and 502-504 only; 501 and later 5xx values such as 505 are capability/protocol errors.
+		return true
+	}
 	switch code {
-	case http.StatusTooManyRequests, http.StatusRequestTimeout, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	case http.StatusRequestTimeout, http.StatusTooManyRequests:
 		return true
 	default:
 		return false
@@ -216,17 +223,25 @@ func retryableStatus(code int) bool {
 }
 
 func retryDelay(resp *http.Response, attempt int) time.Duration {
+	const maxRetryAfter = 30 * time.Second
 	if value := resp.Header.Get("Retry-After"); value != "" {
 		if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
-			return time.Duration(seconds) * time.Second
+			return minDuration(time.Duration(seconds)*time.Second, maxRetryAfter)
 		}
 		if when, err := http.ParseTime(value); err == nil {
 			if delay := time.Until(when); delay > 0 {
-				return delay
+				return minDuration(delay, maxRetryAfter)
 			}
 		}
 	}
 	return time.Duration(100*(1<<attempt)) * time.Millisecond
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func readAPIError(resp *http.Response) error {
@@ -234,6 +249,9 @@ func readAPIError(resp *http.Response) error {
 	message := apiErrorMessage(body)
 	if message == "" {
 		message = http.StatusText(resp.StatusCode)
+	}
+	if resp.Request != nil {
+		message = redactString(message, bearerToken(resp.Request.Header.Get("Authorization")))
 	}
 	return &APIError{StatusCode: resp.StatusCode, Message: message}
 }
@@ -271,4 +289,39 @@ func topString(obj map[string]any, key string) string {
 		return ""
 	}
 	return value
+}
+
+type redactedError struct {
+	err     error
+	secrets []string
+}
+
+func (e redactedError) Error() string {
+	return redactString(e.err.Error(), e.secrets...)
+}
+
+func (e redactedError) Unwrap() error {
+	return e.err
+}
+
+func redactError(err error, secrets ...string) error {
+	return redactedError{err: err, secrets: secrets}
+}
+
+func redactString(value string, secrets ...string) string {
+	for _, secret := range secrets {
+		if secret == "" {
+			continue
+		}
+		value = strings.ReplaceAll(value, secret, "***")
+	}
+	return value
+}
+
+func bearerToken(header string) string {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
 }

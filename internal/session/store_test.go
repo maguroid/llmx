@@ -107,6 +107,90 @@ func TestStoreStatePathsAndDanglingLast(t *testing.T) {
 	}
 }
 
+func TestStoreNamedNewConcurrentSaveConflicts(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(root, fixedNow)
+	first, err := store.OpenNamed("work", "p", "m", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.OpenNamed("work", "p", "m", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(first, []chat.Message{{Role: chat.RoleUser, Content: "u1"}, {Role: chat.RoleAssistant, Content: "a1"}}); err != nil {
+		t.Fatal(err)
+	}
+	err = store.Save(second, []chat.Message{{Role: chat.RoleUser, Content: "u2"}, {Role: chat.RoleAssistant, Content: "a2"}})
+	if err == nil || !strings.Contains(err.Error(), `session "work" changed on disk`) {
+		t.Fatalf("Save err = %v", err)
+	}
+	saved := mustLoad(t, filepath.Join(root, "sessions", "work.json"))
+	if got := saved.Messages[0].Content; got != "u1" {
+		t.Fatalf("saved user = %q", got)
+	}
+}
+
+func TestStoreExistingSaveChecksUpdatedAt(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(root, fixedNow)
+	loaded, err := store.OpenNamed("work", "p", "m", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(loaded, []chat.Message{{Role: chat.RoleUser, Content: "u"}, {Role: chat.RoleAssistant, Content: "a"}}); err != nil {
+		t.Fatal(err)
+	}
+	continued, err := store.ContinueNamed("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "sessions", "work.json")
+	onDisk := mustLoad(t, path)
+	onDisk.UpdatedAt = onDisk.UpdatedAt.Add(time.Second)
+	data, err := json.MarshalIndent(onDisk, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, '\n')
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	err = store.Save(continued, []chat.Message{{Role: chat.RoleUser, Content: "u2"}, {Role: chat.RoleAssistant, Content: "a2"}})
+	if err == nil || !strings.Contains(err.Error(), `session "work" changed on disk`) {
+		t.Fatalf("Save err = %v", err)
+	}
+}
+
+func TestStoreSaveDetailedSeparatesLastFailure(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(root, fixedNow)
+	loaded, err := store.OpenNamed("work", "p", "m", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "sessions", "last"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.SaveDetailed(loaded, []chat.Message{{Role: chat.RoleUser, Content: "u"}, {Role: chat.RoleAssistant, Content: "a"}})
+	if err != nil {
+		t.Fatalf("SaveDetailed body err = %v", err)
+	}
+	if result.LastErr == nil {
+		t.Fatal("LastErr = nil")
+	}
+	if _, err := os.Stat(filepath.Join(root, "sessions", "work.json")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func assertPerm(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
 	info, err := os.Stat(path)
@@ -120,4 +204,17 @@ func assertPerm(t *testing.T, path string, want os.FileMode) {
 
 func ptr(s string) *string {
 	return &s
+}
+
+func mustLoad(t *testing.T, path string) Session {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sess Session
+	if err := json.Unmarshal(data, &sess); err != nil {
+		t.Fatal(err)
+	}
+	return sess
 }

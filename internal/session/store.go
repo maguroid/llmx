@@ -38,6 +38,7 @@ type Loaded struct {
 	Session Session
 	Existed bool
 	mtime   time.Time
+	reset   bool
 }
 
 type Info struct {
@@ -54,6 +55,10 @@ type Error struct {
 
 func (e *Error) Error() string {
 	return e.Message
+}
+
+type SaveResult struct {
+	LastErr error
 }
 
 func NewStore(root string, now func() time.Time) *Store {
@@ -77,7 +82,9 @@ func (s *Store) OpenNamed(name, profile, model string, reset bool, system *strin
 	}
 	id := name
 	if reset {
-		return s.newLoaded(id, profile, model, system), nil
+		loaded := s.newLoaded(id, profile, model, system)
+		loaded.reset = true
+		return loaded, nil
 	}
 	loaded, err := s.load(id)
 	if errors.Is(err, os.ErrNotExist) {
@@ -123,16 +130,27 @@ func (s *Store) ContinueLast(profile, model string, system *string) (Loaded, boo
 }
 
 func (s *Store) Save(loaded Loaded, messages []chat.Message) error {
-	if err := s.ensureDirs(); err != nil {
+	result, err := s.SaveDetailed(loaded, messages)
+	if err != nil {
 		return err
 	}
+	if result.LastErr != nil {
+		return result.LastErr
+	}
+	return nil
+}
+
+func (s *Store) SaveDetailed(loaded Loaded, messages []chat.Message) (SaveResult, error) {
+	if err := s.ensureDirs(); err != nil {
+		return SaveResult{}, err
+	}
 	if loaded.Existed {
-		info, err := os.Stat(s.sessionPath(loaded.ID))
+		current, err := s.load(loaded.ID)
 		if err != nil {
-			return err
+			return SaveResult{}, err
 		}
-		if !info.ModTime().Equal(loaded.mtime) {
-			return &Error{Message: fmt.Sprintf("session %q changed on disk", loaded.ID)}
+		if !current.mtime.Equal(loaded.mtime) || !current.Session.UpdatedAt.Equal(loaded.Session.UpdatedAt) {
+			return SaveResult{}, &Error{Message: fmt.Sprintf("session %q changed on disk", loaded.ID)}
 		}
 	}
 	session := loaded.Session
@@ -147,13 +165,22 @@ func (s *Store) Save(loaded Loaded, messages []chat.Message) error {
 	session.Messages = messages
 	data, err := json.MarshalIndent(session, "", "  ")
 	if err != nil {
-		return err
+		return SaveResult{}, err
 	}
 	data = append(data, '\n')
-	if err := writeAtomic(s.sessionsDir(), loaded.ID+".json", data); err != nil {
-		return err
+	if loaded.Existed || loaded.reset {
+		if err := writeAtomic(s.sessionsDir(), loaded.ID+".json", data); err != nil {
+			return SaveResult{}, err
+		}
+	} else {
+		if err := writeAtomicNoReplace(s.sessionsDir(), loaded.ID+".json", data); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return SaveResult{}, &Error{Message: fmt.Sprintf("session %q changed on disk", loaded.ID)}
+			}
+			return SaveResult{}, err
+		}
 	}
-	return writeAtomic(s.sessionsDir(), "last", []byte(loaded.ID+"\n"))
+	return SaveResult{LastErr: writeAtomic(s.sessionsDir(), "last", []byte(loaded.ID+"\n"))}, nil
 }
 
 func (s *Store) List() ([]Info, error) {
@@ -309,6 +336,14 @@ func ValidateName(name string) error {
 }
 
 func writeAtomic(dir, name string, data []byte) error {
+	return writeAtomicMode(dir, name, data, true)
+}
+
+func writeAtomicNoReplace(dir, name string, data []byte) error {
+	return writeAtomicMode(dir, name, data, false)
+}
+
+func writeAtomicMode(dir, name string, data []byte, replace bool) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -338,10 +373,19 @@ func writeAtomic(dir, name string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, filepath.Join(dir, name)); err != nil {
-		return err
+	target := filepath.Join(dir, name)
+	if replace {
+		if err := os.Rename(tmpName, target); err != nil {
+			return err
+		}
+		cleanup = false
+	} else {
+		if err := os.Link(tmpName, target); err != nil {
+			return err
+		}
+		_ = os.Remove(tmpName)
+		cleanup = false
 	}
-	cleanup = false
 	if d, err := os.Open(dir); err == nil {
 		_, _ = io.Copy(io.Discard, d)
 		_ = d.Sync()

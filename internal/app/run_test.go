@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +57,7 @@ func TestRunCompleteSavesSession(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
 	}
-	if stdout.String() != "answer" {
+	if stdout.String() != "answer\n" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	sess := readSession(t, home, "it")
@@ -153,7 +155,7 @@ func TestRunExplicitBaseURLOmitsAuthorizationWhenAPIKeyEmpty(t *testing.T) {
 	if requests != 1 {
 		t.Fatalf("requests = %d", requests)
 	}
-	if stdout.String() != "local ok" {
+	if stdout.String() != "local ok\n" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
@@ -245,6 +247,133 @@ func TestRunStreamAndNoStreamModes(t *testing.T) {
 	}
 }
 
+func TestRunStreamAddsTrailingNewline(t *testing.T) {
+	home := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		_, _ = w.Write([]byte("data: {\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+	writeCredentials(t, home, "[default]\nbase_url="+server.URL+"/v1\napi_key=sk-test\nmodel=m\n")
+
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), Options{
+		Args:        []string{"hello"},
+		Stdin:       strings.NewReader(""),
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		StdinIsTTY:  true,
+		StdoutIsTTY: false,
+		HomeDir:     home,
+		HTTPClient:  server.Client(),
+		SessionName: "stream-newline",
+		Stream:      true,
+		LookupEnv:   emptyEnv,
+		Usage:       func() {},
+	})
+	if code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.String() != "answer\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunStreamOutputErrorDoesNotSaveSession(t *testing.T) {
+	home := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+	writeCredentials(t, home, "[default]\nbase_url="+server.URL+"/v1\napi_key=sk-test\nmodel=m\n")
+
+	var stderr bytes.Buffer
+	code := Run(context.Background(), Options{
+		Args:        []string{"hello"},
+		Stdin:       strings.NewReader(""),
+		Stdout:      failingWriter{err: errors.New("broken pipe")},
+		Stderr:      &stderr,
+		StdinIsTTY:  true,
+		StdoutIsTTY: false,
+		HomeDir:     home,
+		HTTPClient:  server.Client(),
+		SessionName: "pipe",
+		Stream:      true,
+		LookupEnv:   emptyEnv,
+		Usage:       func() {},
+	})
+	if code != ExitAPI {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "output error: broken pipe") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".llmx", "sessions", "pipe.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("session file err = %v, want not exist", err)
+	}
+}
+
+func TestRunRedactsAPIKeyFromAPIError(t *testing.T) {
+	home := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad key sk-secret"}}`))
+	}))
+	defer server.Close()
+	writeCredentials(t, home, "[default]\nbase_url="+server.URL+"/v1\napi_key=sk-secret\nmodel=m\n")
+
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), Options{
+		Args:        []string{"hello"},
+		Stdin:       strings.NewReader(""),
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		StdinIsTTY:  true,
+		StdoutIsTTY: false,
+		HomeDir:     home,
+		HTTPClient:  server.Client(),
+		LookupEnv:   emptyEnv,
+		Usage:       func() {},
+	})
+	if code != ExitAPI {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "sk-secret") || strings.Contains(stdout.String(), "sk-secret") {
+		t.Fatalf("secret leaked; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunRedactsAPIKeyFromRequestFailure(t *testing.T) {
+	home := t.TempDir()
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("request failed with sk-secret")
+	})}
+	writeCredentials(t, home, "[default]\nbase_url=https://example.test/v1\napi_key=sk-secret\nmodel=m\n")
+
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), Options{
+		Args:        []string{"hello"},
+		Stdin:       strings.NewReader(""),
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		StdinIsTTY:  true,
+		StdoutIsTTY: false,
+		HomeDir:     home,
+		HTTPClient:  httpClient,
+		LookupEnv:   emptyEnv,
+		Usage:       func() {},
+	})
+	if code != ExitNetwork {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "sk-secret") || strings.Contains(stdout.String(), "sk-secret") {
+		t.Fatalf("secret leaked; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
 func writeCredentials(t *testing.T, home, content string) {
 	t.Helper()
 	dir := filepath.Join(home, ".llmx")
@@ -277,4 +406,12 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
+}
+
+type failingWriter struct {
+	err error
+}
+
+func (w failingWriter) Write([]byte) (int, error) {
+	return 0, w.err
 }

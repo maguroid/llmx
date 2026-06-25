@@ -3,10 +3,12 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/maguroid/llmx/internal/chat"
 )
@@ -91,8 +93,9 @@ func TestStreamWithHTTPTestServer(t *testing.T) {
 		Messages:      []chat.Message{{Role: chat.RoleUser, Content: "hi"}},
 		Stream:        true,
 		StreamOptions: &chat.StreamOptions{IncludeUsage: true},
-	}, func(delta string) {
+	}, func(delta string) error {
 		deltas = append(deltas, delta)
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,5 +105,82 @@ func TestStreamWithHTTPTestServer(t *testing.T) {
 	}
 	if strings.Join(deltas, "") != "hello" {
 		t.Fatalf("deltas = %q", deltas)
+	}
+}
+
+func TestAPIErrorMessageFallbacks(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "error message",
+			body: `{"error":{"message":"nested"}}`,
+			want: "nested",
+		},
+		{
+			name: "detail",
+			body: `{"detail":"detail text"}`,
+			want: "detail text",
+		},
+		{
+			name: "error string",
+			body: `{"error":"top error"}`,
+			want: "top error",
+		},
+		{
+			name: "raw body",
+			body: `<html>bad gateway</html>`,
+			want: "<html>bad gateway</html>",
+		},
+		{
+			name: "empty body",
+			body: `   `,
+			want: "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := apiErrorMessage([]byte(tc.body)); got != tc.want {
+				t.Fatalf("apiErrorMessage() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadAPIErrorEmptyBodyUsesStatusText(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body:       io.NopCloser(strings.NewReader("")),
+	}
+	err := readAPIError(resp)
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("err type = %T", err)
+	}
+	if apiErr.Message != http.StatusText(http.StatusBadGateway) {
+		t.Fatalf("message = %q", apiErr.Message)
+	}
+}
+
+func TestRetryableStatus(t *testing.T) {
+	for _, code := range []int{http.StatusRequestTimeout, http.StatusTooManyRequests, 500, 502, 503, 504} {
+		if !retryableStatus(code) {
+			t.Fatalf("%d should be retryable", code)
+		}
+	}
+	for _, code := range []int{501, 505} {
+		if retryableStatus(code) {
+			t.Fatalf("%d should not be retryable", code)
+		}
+	}
+}
+
+func TestRetryAfterIsCapped(t *testing.T) {
+	resp := &http.Response{Header: make(http.Header)}
+	resp.Header.Set("Retry-After", "120")
+	if got := retryDelay(resp, 0); got != 30*time.Second {
+		t.Fatalf("retryDelay = %v", got)
 	}
 }

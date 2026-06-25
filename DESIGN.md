@@ -237,6 +237,8 @@ type StreamOptions struct {
 
 `--json` 指定時は `stream=false` で一括取得し、`{content, model, usage, finish_reason}` を**単一 JSON オブジェクト**で出力（`--json` は `--no-stream` を含意）。行単位ストリーム（JSONL）は将来 `--jsonl` として別フラグで検討（未決）。
 
+プレーンテキスト出力はストリーム / 一括のどちらでも、空応答を除き応答末尾に改行を 1 つ保証する。応答が既に `\n` で終わる場合は追加しない。`--json` 出力は対象外。
+
 ## 履歴（セッション）設計
 
 ```
@@ -293,7 +295,7 @@ type StreamOptions struct {
 - **base_url の結合**: `net/url` で parse し `strings.TrimRight(u.Path, "/") + "/chat/completions"` で組み立てる（`/v1chat/...` や `//` を防ぐ）。エンドポイント込み URL は非対応とし、`base_url` は API root と定義。送信前に resolved endpoint を `--verbose` で確認可能に
 - **Authorization**: `api_key` が空なら Authorization ヘッダを送らない（ローカル互換）。非空なら `Bearer <key>` を送る
 - タイムアウト既定（実装時に確定）: 全体 ~2 分 / 接続 ~10 秒 / ストリーム無通信 ~60 秒
-- リトライ: `429` / `408` / `502` / `503` / `504` は `Retry-After` を尊重し小さな指数バックオフ。ただし**ストリーム開始後は重複出力を避けるためリトライしない**
+- リトライ: `408` / `429` / `500` / `502`-`504` は `Retry-After`（上限あり）を尊重し小さな指数バックオフ。`501` / `505` 等は retryable にしない。ただし**ストリーム開始後は重複出力を避けるためリトライしない**
 
 ### 終了コード
 

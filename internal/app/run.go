@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/maguroid/llmx/internal/chat"
@@ -63,6 +64,8 @@ type Options struct {
 
 func Run(ctx context.Context, opts Options) int {
 	fillDefaults(&opts)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	root := filepath.Join(opts.HomeDir, ".llmx")
 	store := session.NewStore(root, time.Now)
 	if code := handleSessionManagement(store, opts); code >= 0 {
@@ -131,8 +134,12 @@ func Run(ctx context.Context, opts Options) int {
 	var usage *chat.Usage
 	var finishReason string
 	if req.Stream {
-		result, err := apiClient.Stream(ctx, resolved.APIKey, req, func(delta string) {
-			_ = output.Text(opts.Stdout, delta)
+		result, err := apiClient.Stream(ctx, resolved.APIKey, req, func(delta string) error {
+			_, err := io.WriteString(opts.Stdout, delta)
+			if err != nil {
+				return outputWriteError{err: err}
+			}
+			return nil
 		})
 		if err != nil {
 			return handleRunError(ctx, opts, err)
@@ -141,6 +148,10 @@ func Run(ctx context.Context, opts Options) int {
 		model = first(result.Model, resolved.Model)
 		usage = result.Usage
 		finishReason = result.FinishReason
+		if err := writeStreamTrailingNewline(opts.Stdout, assistant); err != nil {
+			fmt.Fprintf(opts.Stderr, "output error: %v\n", err)
+			return ExitAPI
+		}
 	} else {
 		resp, err := apiClient.Complete(ctx, resolved.APIKey, req)
 		if err != nil {
@@ -169,9 +180,13 @@ func Run(ctx context.Context, opts Options) int {
 	saved := append(messages, chat.Message{Role: chat.RoleAssistant, Content: assistant})
 	loaded.Session.Profile = resolved.Profile
 	loaded.Session.Model = resolved.Model
-	if err := store.Save(loaded, saved); err != nil {
+	saveResult, err := store.SaveDetailed(loaded, saved)
+	if err != nil {
 		fmt.Fprintf(opts.Stderr, "session error: %v\n", err)
 		return ExitAPI
+	}
+	if saveResult.LastErr != nil {
+		fmt.Fprintf(opts.Stderr, "warning: saved session but failed to update last: %v\n", saveResult.LastErr)
 	}
 	return ExitOK
 }
@@ -342,9 +357,18 @@ func firstChoice(choices []chat.Choice) chat.Choice {
 }
 
 func handleRunError(ctx context.Context, opts Options, err error) int {
-	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+	var outErr outputWriteError
+	if errors.As(err, &outErr) {
+		fmt.Fprintf(opts.Stderr, "output error: %v\n", outErr.err)
+		return ExitAPI
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 		fmt.Fprintln(opts.Stderr, "interrupted; session was not saved")
 		return ExitInterrupt
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		fmt.Fprintf(opts.Stderr, "network error: %v\n", err)
+		return ExitNetwork
 	}
 	var apiErr *client.APIError
 	if errors.As(err, &apiErr) {
@@ -363,6 +387,26 @@ func handleRunError(ctx context.Context, opts Options, err error) int {
 	}
 	fmt.Fprintf(opts.Stderr, "network error: %v\n", err)
 	return ExitNetwork
+}
+
+type outputWriteError struct {
+	err error
+}
+
+func (e outputWriteError) Error() string {
+	return e.err.Error()
+}
+
+func (e outputWriteError) Unwrap() error {
+	return e.err
+}
+
+func writeStreamTrailingNewline(w io.Writer, content string) error {
+	if content == "" || strings.HasSuffix(content, "\n") {
+		return nil
+	}
+	_, err := io.WriteString(w, "\n")
+	return err
 }
 
 func first(values ...string) string {
