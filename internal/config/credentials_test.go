@@ -87,6 +87,9 @@ func TestResolvePriority(t *testing.T) {
 	if resolved.APIKey.Reveal() != "from-env-ref" {
 		t.Fatalf("api_key = %q", resolved.APIKey.Reveal())
 	}
+	if resolved.BaseURLFromDefault {
+		t.Fatal("base_url should be explicit")
+	}
 }
 
 func TestResolveEmptyLLMXAPIKeyOverridesProfile(t *testing.T) {
@@ -105,5 +108,38 @@ func TestResolveEmptyLLMXAPIKeyOverridesProfile(t *testing.T) {
 	}
 	if resolved.APIKey.Reveal() != "" {
 		t.Fatalf("api_key = %q", resolved.APIKey.Reveal())
+	}
+}
+
+func TestResolveBaseURLFromDefault(t *testing.T) {
+	resolved, err := Resolve(nil, CLIValues{}, func(string) (string, bool) {
+		return "", false
+	}, "credentials")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.BaseURL != DefaultBaseURL {
+		t.Fatalf("base_url = %q", resolved.BaseURL)
+	}
+	if !resolved.BaseURLFromDefault {
+		t.Fatal("base_url should be marked as default")
+	}
+}
+
+func TestResolveBaseURLExplicitFromEnv(t *testing.T) {
+	resolved, err := Resolve(nil, CLIValues{}, func(key string) (string, bool) {
+		if key == "LLMX_BASE_URL" {
+			return "http://localhost:1234/v1", true
+		}
+		return "", false
+	}, "credentials")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.BaseURL != "http://localhost:1234/v1" {
+		t.Fatalf("base_url = %q", resolved.BaseURL)
+	}
+	if resolved.BaseURLFromDefault {
+		t.Fatal("base_url should be marked as explicit")
 	}
 }

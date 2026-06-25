@@ -94,7 +94,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	var stops stopValues
 	var cShort, cLong bool
 	var sessionName, system stringValue
-	var newSession, insecure, noStream, jsonOut, listSessions, clearSessions bool
+	var newSession, insecure, stream, noStream, jsonOut, listSessions, clearSessions bool
 	var removeSession stringValue
 	fs.Var(&pShort, "p", "profile name (flags must appear before the prompt)")
 	fs.Var(&pLong, "profile", "profile name (flags must appear before the prompt)")
@@ -110,6 +110,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	fs.Var(&maxTokens, "max-tokens", "maximum tokens")
 	fs.Var(&stops, "stop", "stop sequence; may be repeated")
 	fs.Var(&topP, "top-p", "top_p")
+	fs.BoolVar(&stream, "stream", false, "force streaming output")
 	fs.BoolVar(&noStream, "no-stream", false, "disable streaming")
 	fs.BoolVar(&jsonOut, "json", false, "write a single JSON object; implies --no-stream")
 	fs.BoolVar(&listSessions, "list-sessions", false, "list sessions")
@@ -161,6 +162,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		SystemSet:     system.set,
 		Temperature:   temperature,
 		Stops:         stops,
+		Stream:        stream,
 		NoStream:      noStream,
 		JSON:          jsonOut,
 		ListSessions:  listSessions,

@@ -54,6 +54,7 @@ type Options struct {
 	Stops       []string
 
 	NoStream      bool
+	Stream        bool
 	JSON          bool
 	ListSessions  bool
 	RemoveSession string
@@ -65,6 +66,9 @@ func Run(ctx context.Context, opts Options) int {
 	root := filepath.Join(opts.HomeDir, ".llmx")
 	store := session.NewStore(root, time.Now)
 	if code := handleSessionManagement(store, opts); code >= 0 {
+		return code
+	}
+	if code := validateOutputMode(opts); code != ExitOK {
 		return code
 	}
 	prompt, code := collectPrompt(opts)
@@ -85,6 +89,10 @@ func Run(ctx context.Context, opts Options) int {
 	resolved, err := config.Resolve(creds, config.CLIValues{Profile: opts.Profile, Model: opts.Model}, opts.LookupEnv, config.CredentialsPath(opts.HomeDir))
 	if err != nil {
 		fmt.Fprintf(opts.Stderr, "configuration error: %v\n", err)
+		return ExitConfig
+	}
+	if resolved.APIKey.Reveal() == "" && resolved.BaseURLFromDefault {
+		fmt.Fprintln(opts.Stderr, "configuration error: no API key configured; create ~/.llmx/credentials or set LLMX_API_KEY")
 		return ExitConfig
 	}
 	loaded, dangling, err := openSession(store, opts, resolved)
@@ -307,7 +315,21 @@ func shouldStream(opts Options) bool {
 	if opts.JSON || opts.NoStream {
 		return false
 	}
+	if opts.Stream {
+		return true
+	}
 	return opts.StdoutIsTTY
+}
+
+func validateOutputMode(opts Options) int {
+	if opts.Stream && opts.NoStream {
+		fmt.Fprintln(opts.Stderr, "usage error: --stream and --no-stream are mutually exclusive")
+		if opts.Usage != nil {
+			opts.Usage()
+		}
+		return ExitUsage
+	}
+	return ExitOK
 }
 
 func firstChoice(choices []chat.Choice) chat.Choice {

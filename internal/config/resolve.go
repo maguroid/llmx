@@ -18,10 +18,11 @@ type CLIValues struct {
 }
 
 type Resolved struct {
-	Profile string
-	BaseURL string
-	APIKey  chat.Secret
-	Model   string
+	Profile            string
+	BaseURL            string
+	BaseURLFromDefault bool
+	APIKey             chat.Secret
+	Model              string
 }
 
 func CredentialsPath(home string) string {
@@ -53,7 +54,7 @@ func Resolve(creds *Credentials, cli CLIValues, lookup func(string) (string, boo
 	if creds != nil {
 		def = creds.Profiles["default"]
 	}
-	baseURL := firstNonEmpty(envValue(lookup, "LLMX_BASE_URL"), selected.BaseURL, def.BaseURL, DefaultBaseURL)
+	baseURL, baseURLFromDefault := resolveBaseURL(lookup, selected, def)
 	model := firstNonEmpty(cli.Model, envValue(lookup, "LLMX_MODEL"), selected.Model, def.Model, DefaultModel)
 	apiKey, apiKeySet := lookup("LLMX_API_KEY")
 	if !apiKeySet {
@@ -71,11 +72,20 @@ func Resolve(creds *Credentials, cli CLIValues, lookup func(string) (string, boo
 		}
 	}
 	return Resolved{
-		Profile: profileName,
-		BaseURL: baseURL,
-		APIKey:  chat.NewSecret(apiKey),
-		Model:   model,
+		Profile:            profileName,
+		BaseURL:            baseURL,
+		BaseURLFromDefault: baseURLFromDefault,
+		APIKey:             chat.NewSecret(apiKey),
+		Model:              model,
 	}, nil
+}
+
+func resolveBaseURL(lookup func(string) (string, bool), selected, def Profile) (string, bool) {
+	baseURL := firstNonEmpty(envValue(lookup, "LLMX_BASE_URL"), selected.BaseURL, def.BaseURL)
+	if baseURL != "" {
+		return baseURL, false
+	}
+	return DefaultBaseURL, true
 }
 
 func envValue(lookup func(string) (string, bool), key string) string {
