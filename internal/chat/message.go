@@ -41,14 +41,15 @@ func (s Secret) MarshalJSON() ([]byte, error) {
 }
 
 type Request struct {
-	Model         string         `json:"model"`
-	Messages      []Message      `json:"messages"`
-	Stream        bool           `json:"stream"`
-	Temperature   *float64       `json:"temperature,omitempty"`
-	MaxTokens     *int           `json:"max_tokens,omitempty"`
-	TopP          *float64       `json:"top_p,omitempty"`
-	Stop          []string       `json:"stop,omitempty"`
-	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []Message      `json:"messages"`
+	Stream          bool           `json:"stream"`
+	Temperature     *float64       `json:"temperature,omitempty"`
+	MaxTokens       *int           `json:"max_tokens,omitempty"`
+	TopP            *float64       `json:"top_p,omitempty"`
+	Stop            []string       `json:"stop,omitempty"`
+	ReasoningEffort *string        `json:"reasoning_effort,omitempty"`
+	StreamOptions   *StreamOptions `json:"stream_options,omitempty"`
 }
 
 type StreamOptions struct {

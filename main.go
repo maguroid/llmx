@@ -92,6 +92,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	var tShort, tLong, topP floatValue
 	var maxTokens intValue
 	var stops stopValues
+	var reasoningEffort stringValue
 	var cShort, cLong bool
 	var sessionName, system stringValue
 	var newSession, insecure, stream, noStream, jsonOut, verbose, listSessions, clearSessions bool
@@ -110,6 +111,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	fs.Var(&maxTokens, "max-tokens", "maximum tokens")
 	fs.Var(&stops, "stop", "stop sequence; may be repeated")
 	fs.Var(&topP, "top-p", "top_p")
+	fs.Var(&reasoningEffort, "reasoning-effort", "reasoning_effort")
 	fs.BoolVar(&stream, "stream", false, "force streaming output")
 	fs.BoolVar(&noStream, "no-stream", false, "disable streaming")
 	fs.BoolVar(&jsonOut, "json", false, "write a single JSON object; implies --no-stream")
@@ -177,6 +179,9 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	}
 	if topP.set {
 		opts.TopP = &topP.value
+	}
+	if reasoningEffort.set {
+		opts.ReasoningEffort = &reasoningEffort.value
 	}
 	return app.Run(ctx, opts)
 }

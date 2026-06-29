@@ -146,26 +146,27 @@ Sessions are stored as JSON under `~/.llmx/sessions/` (`0600`).
 
 ## Flags
 
-| Flag                        | Description                                          |
-| --------------------------- | ---------------------------------------------------- |
-| `-p`, `--profile <name>`    | Profile to use (default `default`)                   |
-| `-m`, `--model <name>`      | Override the model                                   |
-| `--system <text>`           | System prompt                                        |
-| `-t`, `--temperature <n>`   | Sampling temperature                                 |
-| `--top-p <n>`               | Nucleus sampling (`top_p`)                           |
-| `--max-tokens <n>`          | Maximum tokens to generate                           |
-| `--stop <seq>`              | Stop sequence (repeatable)                           |
-| `--stream`                  | Force streaming output                               |
-| `--no-stream`               | Disable streaming                                    |
-| `--json`                    | Emit a single JSON object (implies `--no-stream`)    |
-| `-c`, `--continue`          | Continue the last session                            |
-| `--session <name>`          | Use a named session                                  |
-| `--new`                     | New session; with `--session`, reset it              |
-| `--list-sessions`           | List sessions                                        |
-| `--rm-session <name>`       | Remove a named session                               |
-| `--clear-sessions`          | Remove all sessions                                  |
-| `-v`, `--verbose`           | Print resolved request diagnostics to stderr         |
-| `--insecure`                | Allow loose permissions on `~/.llmx`                 |
+| Flag                          | Description                                        |
+| ----------------------------- | -------------------------------------------------- |
+| `-p`, `--profile <name>`      | Profile to use (default `default`)                 |
+| `-m`, `--model <name>`        | Override the model                                 |
+| `--system <text>`             | System prompt                                      |
+| `-t`, `--temperature <n>`     | Sampling temperature                               |
+| `--top-p <n>`                 | Nucleus sampling (`top_p`)                         |
+| `--max-tokens <n>`            | Maximum tokens to generate                         |
+| `--reasoning-effort <effort>` | Provider-dependent `reasoning_effort` pass-through |
+| `--stop <seq>`                | Stop sequence (repeatable)                         |
+| `--stream`                    | Force streaming output                             |
+| `--no-stream`                 | Disable streaming                                  |
+| `--json`                      | Emit a single JSON object (implies `--no-stream`)  |
+| `-c`, `--continue`            | Continue the last session                          |
+| `--session <name>`            | Use a named session                                |
+| `--new`                       | New session; with `--session`, reset it            |
+| `--list-sessions`             | List sessions                                      |
+| `--rm-session <name>`         | Remove a named session                             |
+| `--clear-sessions`            | Remove all sessions                                |
+| `-v`, `--verbose`             | Print resolved request diagnostics to stderr       |
+| `--insecure`                  | Allow loose permissions on `~/.llmx`               |
 
 Streaming defaults to on when stdout is a TTY and off when piped; `--stream` /
 `--no-stream` override this. Diagnostics and warnings go to stderr, so stdout

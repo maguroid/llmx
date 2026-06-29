@@ -100,6 +100,7 @@ llmx --session task --new "Start over." < /dev/null          # --new resets the 
 ## Reference
 
 Common flags: `-p/--profile`, `-m/--model`, `--system`, `-t/--temperature`,
-`--top-p`, `--max-tokens`, `--stop` (repeatable), `--stream`/`--no-stream`,
-`--json`, `-c/--continue`, `--session`, `--new`, `-v/--verbose`. Run
+`--top-p`, `--max-tokens`, `--reasoning-effort`, `--stop` (repeatable),
+`--stream`/`--no-stream`, `--json`, `-c/--continue`, `--session`, `--new`,
+`-v/--verbose`. Run
 `llmx -h` or see the project README for the full list and details.

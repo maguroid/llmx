@@ -68,7 +68,7 @@ llmx -t 0.7 --max-tokens 1000 --stop "###" "..."
 | — | `--session NAME` | 名前付きセッション |
 | — | `--new` | 新規セッション（既定。`--session` と併用時のみ意味を持つ → 後述） |
 | — | `--system` | system プロンプト |
-| — | `--max-tokens` / `--stop` / `--top-p` | 生成パラメータ |
+| — | `--max-tokens` / `--stop` / `--top-p` / `--reasoning-effort` | 生成パラメータ |
 | — | `--stream` / `--no-stream` / `--json` | 出力モード |
 
 短縮形と長形の両方指定は「同値なら許容、矛盾値ならエラー」とする。
@@ -201,14 +201,15 @@ type Message struct {
 
 // client — リクエストは OpenAI chat completions 準拠
 type Request struct {
-    Model         string         `json:"model"`
-    Messages      []Message      `json:"messages"`
-    Stream        bool           `json:"stream"`
-    Temperature   *float64       `json:"temperature,omitempty"`
-    MaxTokens     *int           `json:"max_tokens,omitempty"`
-    TopP          *float64       `json:"top_p,omitempty"`
-    Stop          []string       `json:"stop,omitempty"`          // 複数 --stop を配列で送る
-    StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+    Model           string         `json:"model"`
+    Messages        []Message      `json:"messages"`
+    Stream          bool           `json:"stream"`
+    Temperature     *float64       `json:"temperature,omitempty"`
+    MaxTokens       *int           `json:"max_tokens,omitempty"`
+    TopP            *float64       `json:"top_p,omitempty"`
+    Stop            []string       `json:"stop,omitempty"`          // 複数 --stop を配列で送る
+    ReasoningEffort *string        `json:"reasoning_effort,omitempty"`
+    StreamOptions   *StreamOptions `json:"stream_options,omitempty"`
 }
 
 type StreamOptions struct {
@@ -217,6 +218,7 @@ type StreamOptions struct {
 ```
 
 - ポインタ + `omitempty` で「未指定はサーバ既定に委ねる」を表現
+- `reasoning_effort` は CLI のみで指定する provider-dependent な pass-through 文字列。credentials / env では解決しない
 - `n`（複数候補）は **対応しない（常に 1）**と明記。出力・履歴保存が複雑化するため
 - `max_tokens` は新しめのモデルで `max_completion_tokens` を要求する場合がある。当面は `max_tokens` を採用し、必要に応じプロファイル単位で切替えられる余地を残す（実装時 TODO）
 - レスポンスのデコードは **未知フィールドを落とさない**方針（将来の reasoning 系等に備える）

@@ -49,10 +49,11 @@ type Options struct {
 	System      string
 	SystemSet   bool
 
-	Temperature *float64
-	MaxTokens   *int
-	TopP        *float64
-	Stops       []string
+	Temperature     *float64
+	MaxTokens       *int
+	TopP            *float64
+	Stops           []string
+	ReasoningEffort *string
 
 	NoStream      bool
 	Stream        bool
@@ -110,13 +111,14 @@ func Run(ctx context.Context, opts Options) int {
 	messages := applySystem(append([]chat.Message(nil), loaded.Session.Messages...), opts)
 	messages = append(messages, chat.Message{Role: chat.RoleUser, Content: prompt})
 	req := chat.Request{
-		Model:       resolved.Model,
-		Messages:    messages,
-		Stream:      shouldStream(opts),
-		Temperature: opts.Temperature,
-		MaxTokens:   opts.MaxTokens,
-		TopP:        opts.TopP,
-		Stop:        opts.Stops,
+		Model:           resolved.Model,
+		Messages:        messages,
+		Stream:          shouldStream(opts),
+		Temperature:     opts.Temperature,
+		MaxTokens:       opts.MaxTokens,
+		TopP:            opts.TopP,
+		Stop:            opts.Stops,
+		ReasoningEffort: opts.ReasoningEffort,
 	}
 	if req.Stream {
 		req.StreamOptions = &chat.StreamOptions{IncludeUsage: true}

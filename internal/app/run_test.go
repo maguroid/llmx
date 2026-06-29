@@ -161,6 +161,45 @@ func TestRunExplicitBaseURLOmitsAuthorizationWhenAPIKeyEmpty(t *testing.T) {
 	}
 }
 
+func TestRunSendsReasoningEffort(t *testing.T) {
+	home := t.TempDir()
+	effort := "high"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req chat.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+		if req.ReasoningEffort == nil || *req.ReasoningEffort != effort {
+			t.Fatalf("reasoning_effort = %v", req.ReasoningEffort)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+	writeCredentials(t, home, "[default]\nbase_url="+server.URL+"/v1\napi_key=sk-test\nmodel=m\n")
+
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), Options{
+		Args:            []string{"hello"},
+		Stdin:           strings.NewReader(""),
+		Stdout:          &stdout,
+		Stderr:          &stderr,
+		StdinIsTTY:      true,
+		StdoutIsTTY:     false,
+		HomeDir:         home,
+		HTTPClient:      server.Client(),
+		LookupEnv:       emptyEnv,
+		Usage:           func() {},
+		ReasoningEffort: &effort,
+	})
+	if code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.String() != "ok\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func TestRunStripsTrailingChatCompletionsFromBaseURL(t *testing.T) {
 	tests := []struct {
 		name        string
